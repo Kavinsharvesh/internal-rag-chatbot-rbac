@@ -1,10 +1,16 @@
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
+from app.schemas.chat import ChatRequest, ChatResponse
+from app.services.search_service import search_documents
 
-app = FastAPI()
+
+app = FastAPI(
+    title="Internal Chatbot with RBAC",
+    description="RAG-based internal chatbot with Role-Based Access Control"
+)
 security = HTTPBasic()
 
 # Dummy user database
@@ -14,7 +20,7 @@ users_db: Dict[str, Dict[str, str]] = {
     "Sam": {"password": "financepass", "role": "finance"},
     "Peter": {"password": "pete123", "role": "engineering"},
     "Sid": {"password": "sidpass123", "role": "marketing"},
-    "Natasha": {"passwoed": "hrpass123", "role": "hr"}
+    "Natasha": {"password": "hrpass123", "role": "hr"}
 }
 
 
@@ -41,6 +47,24 @@ def test(user=Depends(authenticate)):
 
 
 # Protected chat endpoint
-@app.post("/chat")
-def query(user=Depends(authenticate), message: str = "Hello"):
-    return "Implement this endpoint."
+@app.post("/chat", response_model=ChatResponse)
+def query(
+    user=Depends(authenticate),
+    request: Optional[ChatRequest] = None,
+    message: Optional[str] = None
+):
+    """
+    Role-Based Access Control (RBAC) Chat Endpoint.
+    Searches documents in resources/data/ strictly permitted for the authenticated user's role.
+    """
+    query_text = ""
+    if request and request.message:
+        query_text = request.message
+    elif message:
+        query_text = message
+    else:
+        query_text = "Hello"
+
+    role = user["role"]
+    response = search_documents(query=query_text, role=role)
+    return response
