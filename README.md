@@ -13,6 +13,8 @@ This project implements a **Security-First RAG Pipeline** built on **FastAPI**, 
 ### Current Implementation Status
 The project currently operates in an **Offline Retrieval Fallback Mode** (no external LLM API key required). Authorized document chunks are semantically retrieved, validated, and returned with exact source citations.
 
+> **Note on LLM Integration**: The current implementation performs authorized RAG retrieval and deterministic offline fallback formatting. A production LLM for natural-language answer synthesis is planned for a future phase but has NOT yet been integrated.
+
 ---
 
 ## 🏗️ System Architecture
@@ -81,7 +83,7 @@ ds-rpc-01/
 │   │   ├── answer_service.py   # Offline fallback answer formatter
 │   │   └── search_service.py   # Keyword fallback search service
 │   └── utils/
-├── chroma_db/                  # Persistent ChromaDB vector database files
+├── chroma_db/                  # Generated locally; ignored by Git
 ├── resources/
 │   └── data/                   # Departmental knowledge base
 │       ├── engineering/        # engineering_master_doc.md
@@ -110,12 +112,15 @@ ds-rpc-01/
 
 ### 2. Environment Setup & Dependency Installation
 
-Clone the repository and activate your virtual environment:
+Clone the repository and set up your virtual environment:
 
 ```powershell
 # Clone the repository
 git clone https://github.com/Kavinsharvesh/internal-rag-chatbot-rbac.git
 cd internal-rag-chatbot-rbac
+
+# Create virtual environment
+python -m venv .venv
 
 # Activate virtual environment (Windows PowerShell)
 .\.venv\Scripts\Activate.ps1
@@ -141,18 +146,20 @@ python -m fastapi dev app/main.py
 
 ## 💡 API Usage Examples
 
-### Test Accounts (HTTP Basic Auth)
+### Test Accounts & Roles
 
-| Username | Password | Role |
-| :--- | :--- | :--- |
-| `Tony` | `password123` | `engineering` |
-| `Sam` | `financepass` | `finance` |
-| `Natasha` | `hrpass123` | `hr` |
-| `Bruce` | `securepass` | `marketing` |
+| Username | Role |
+| :--- | :--- |
+| `Tony` | `engineering` |
+| `Sam` | `finance` |
+| `Natasha` | `hr` |
+| `Bruce` | `marketing` |
+
+> *Note: Demo passwords are configured in the local application and are intentionally not published here.*
 
 ### 1. Authorized Engineering Query (User: `Tony`)
 ```powershell
-curl -u Tony:password123 -X POST "http://127.0.0.1:8000/chat" `
+curl -u USERNAME:PASSWORD -X POST "http://127.0.0.1:8000/chat" `
      -H "Content-Type: application/json" `
      -d '{"message": "architecture overview"}'
 ```
@@ -171,7 +178,7 @@ curl -u Tony:password123 -X POST "http://127.0.0.1:8000/chat" `
 
 ### 2. Unauthorized Query Attempt (User: `Tony` requesting Finance information)
 ```powershell
-curl -u Tony:password123 -X POST "http://127.0.0.1:8000/chat" `
+curl -u USERNAME:PASSWORD -X POST "http://127.0.0.1:8000/chat" `
      -H "Content-Type: application/json" `
      -d '{"message": "quarterly revenue report"}'
 ```
@@ -216,8 +223,3 @@ python tests/test_phase2e.py
 - 📊 **Monitoring & Telemetry**: Retrieval metrics, response latency, and usage tracking.
 - 💻 **Interactive UI**: Streamlit web interface for enterprise chat interaction.
 
----
-
-## 📜 License
-
-Distributed under the MIT License.
