@@ -4,7 +4,8 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.search_service import search_documents
+from app.services.rag_service import retrieve_authorized_chunks
+from app.services.answer_service import generate_answer
 
 
 app = FastAPI(
@@ -54,8 +55,11 @@ def query(
     message: Optional[str] = None
 ):
     """
-    Role-Based Access Control (RBAC) Chat Endpoint.
-    Searches documents in resources/data/ strictly permitted for the authenticated user's role.
+    Role-Based Access Control (RBAC) RAG Chat Endpoint.
+    1. Authenticates user via HTTP Basic credentials.
+    2. Resolves actual user role server-side from users_db.
+    3. Runs RBAC pre-filtered vector retrieval in ChromaDB.
+    4. Generates formatted offline retrieval fallback answer with citations.
     """
     query_text = ""
     if request and request.message:
@@ -63,8 +67,13 @@ def query(
     elif message:
         query_text = message
     else:
-        query_text = "Hello"
+        query_text = ""
 
-    role = user["role"]
-    response = search_documents(query=query_text, role=role)
-    return response
+    # Server-side identity resolution: role comes from users_db, NOT client input
+    actual_role = user["role"]
+
+    # RAG pre-filtered retrieval & answer generation
+    retrieval_result = retrieve_authorized_chunks(query=query_text, role=actual_role)
+    response = generate_answer(retrieval_result)
+    return response
+
