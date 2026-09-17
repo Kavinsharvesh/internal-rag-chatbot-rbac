@@ -1,58 +1,60 @@
 # Internal RAG Chatbot with Role-Based Access Control (RBAC)
 
-> **A secure internal knowledge assistant for retrieving authorized company information using Retrieval-Augmented Generation (RAG), vector similarity search, and backend Role-Based Access Control (RBAC).**
+> **A security-focused RAG chatbot prototype enforcing Role-Based Access Control (RBAC) BEFORE vector retrieval, powered by FastAPI, ChromaDB, Sentence Transformers, and Google Gemini API.**
 
 ---
 
-## 📌 Project Overview
+## 📌 1. Project Overview
 
-In enterprise environments, AI chatbots must enforce strict data access boundaries. Providing unfiltered LLM retrieval across company documents risks exposing sensitive financial figures, employee HR files, or proprietary product roadmaps to unauthorized users.
+In corporate environments, AI assistants must respect strict data access boundaries. Unfiltered retrieval over enterprise knowledge bases risks leaking sensitive financial figures, confidential HR records, or strategic product roadmaps to unauthorized employees.
 
-This project implements a **Security-First RAG Pipeline** built on **FastAPI**, **ChromaDB**, and **Sentence-Transformers**. It enforces **Role-Based Access Control (RBAC) pre-filtering BEFORE vector retrieval**, ensuring unauthorized document chunks are excluded prior to similarity distance calculation.
+This project implements a **Security-First RAG Pipeline** that enforces **Role-Based Access Control (RBAC) pre-filtering BEFORE vector similarity retrieval**. Documents are tagged with department metadata upon ingestion. When a user queries the chatbot, their identity and role are resolved strictly on the server. ChromaDB applies metadata filters prior to vector search, ensuring unauthorized document chunks are never exposed or sent to the LLM.
 
-### Current Implementation Status
-The project currently operates in an **Offline Retrieval Fallback Mode** (no external LLM API key required). Authorized document chunks are semantically retrieved, validated, and returned with exact source citations.
-
-> **Note on LLM Integration**: The current implementation performs authorized RAG retrieval and deterministic offline fallback formatting. A production LLM for natural-language answer synthesis is planned for a future phase but has NOT yet been integrated.
+Natural-language answers are generated using **Google Gemini API** (`google-genai`). If an API key is unconfigured or unavailable, the system cleanly degrades to a deterministic **Offline Retrieval Fallback Mode** without crashing or leaking data.
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ 2. System Architecture
 
 ```mermaid
 flowchart TD
-    User([User Request]) --> API[FastAPI /chat Endpoint]
+    User([User Client Request]) --> API[FastAPI /chat Endpoint]
     API --> Auth[HTTP Basic Authentication]
-    Auth --> ServerRole[Server-side User & Role Resolution]
-    ServerRole --> RBAC[RBAC Permission Mapping]
+    Auth --> ServerRole[Server-Side Role Resolution via users_db]
+    ServerRole --> RBAC[RBAC Department Permission Mapping]
     RBAC -- "Allowed Departments Filter" --> PreFilter[ChromaDB Pre-Filtering]
-    PreFilter -- "where department in [allowed]" --> VectorStore[(ChromaDB Vector Store)]
-    VectorStore --> DistanceCheck[Vector Distance & Hybrid Relevance Filter]
+    PreFilter -- "where department in [permitted]" --> VectorStore[(ChromaDB Persistent Store)]
+    VectorStore --> DistanceCheck[Vector Cosine Distance Filter]
     DistanceCheck --> Chunks[Authorized Relevant Chunks]
-    Chunks --> OfflineService[Offline Answer Service]
-    OfflineService --> Response[JSON Response: Answer + Sources + Role]
+    Chunks --> LLMCheck{GOOGLE_API_KEY Configured?}
+    LLMCheck -- Yes --> GeminiService[Google Gemini LLM Service]
+    LLMCheck -- No / API Failure --> OfflineService[Deterministic Offline Fallback Service]
+    GeminiService --> Response[JSON Response: Answer + Sources + Mode: gemini]
+    OfflineService --> Response2[JSON Response: Answer + Sources + Mode: offline_fallback]
 ```
 
 ---
 
-## Key Features
+## ⚡ 3. Key Features
 
-- ⚡ **FastAPI Web Application**: High-performance RESTful server with automated OpenAPI/Swagger documentation (`/docs`).
-- 🔐 **Server-Side Authentication & Role Resolution**: HTTP Basic Auth with server-side identity validation in `users_db` (prevents client-side role escalation attacks).
-- 🛡️ **Pre-Filtered Vector Retrieval**: Applies ChromaDB metadata filters (`where={"department": {"$in": [...]}}`) *before* similarity search execution.
-- 📦 **Multi-Format Document Ingestion**: Ingests Markdown (`.md`), Text (`.txt`), and CSV (`.csv`) files from `resources/data/`.
-- 🔒 **Sensitive HR Field Redaction**: Excludes sensitive attributes (such as `salary`) during CSV parsing to prevent data leakage.
-- 🧠 **Local Dense Embeddings**: Embeds chunks using `sentence-transformers/all-MiniLM-L6-v2` locally without external API costs.
-- 💾 **Persistent Vector Indexing**: Stores ~437 document chunks in a persistent ChromaDB store (`chroma_db/`) with deterministic `chunk_id` upsert deduplication.
-- 🎯 **Hybrid Relevance Validation**: Combines vector cosine distance (`<= 0.75`) with core domain term verification to eliminate generic word false positives.
-- 📝 **Source Attribution**: Returns clean, deduplicated file path citations (e.g. `["engineering/engineering_master_doc.md"]`).
-- 🧪 **Automated Verification Suite**: Comprehensive test suite covering ingestion (`test_phase2b.py`), vector persistence (`test_phase2c.py`), RBAC pre-filtering (`test_phase2d.py`), and end-to-end `/chat` security (`test_phase2e.py`).
+- 🚀 **FastAPI REST API**: High-performance async web framework with automated OpenAPI/Swagger interactive documentation (`/docs`).
+- 🔐 **Server-Side Authentication**: HTTP Basic Authentication with server-side identity validation in `users_db` (blocks client-side role escalation payloads).
+- 🛡️ **Pre-Vector RBAC Filtering**: Enforces metadata filters (`where={"department": {"$in": [...]}}`) *before* similarity search execution.
+- 📦 **Multi-Format Document Ingestion**: Parses Markdown (`.md`), Plain Text (`.txt`), and CSV (`.csv`) documents from `resources/data/`.
+- 🔒 **Sensitive HR Field Redaction**: Excludes sensitive CSV attributes (such as `salary`) during parsing to prevent data leakage.
+- 🧠 **Local Dense Embeddings**: Embeds document chunks using `sentence-transformers/all-MiniLM-L6-v2` locally with zero external latency or API costs.
+- 💾 **Persistent Vector Storage**: Stores ~437 document chunks in a persistent ChromaDB database (`chroma_db/`) with deterministic `chunk_id` deduplication.
+- 🤖 **Google Gemini API Integration**: Synthesizes natural-language answers using the official `google-genai` SDK (`gemini-3.6-flash`, `gemini-3.5-flash`) with grounded prompt injection safeguards.
+- 🔄 **Graceful Offline Fallback**: Degrades automatically to deterministic chunk retrieval if Gemini API is unconfigured or unreachable.
+- 🧪 **Pytest Automated Test Suite**: 100% passing test suite (`pytest`) covering document ingestion, vector persistence, RBAC filtering, FastAPI integration, and Gemini synthesis safety.
 
 ---
 
-## 🔒 Role-Based Permission Matrix
+## 🔒 4. Security & RBAC Workflow
 
-Each authenticated role has strict department folder permissions:
+### Role-Based Permission Matrix
+
+Each authenticated role has explicit access boundaries:
 
 | User Role | Permitted Department Folders | Restricted Folders |
 | :--- | :--- | :--- |
@@ -62,126 +64,181 @@ Each authenticated role has strict department folder permissions:
 | `marketing` | `marketing/`, `general/` | `engineering/`, `finance/`, `hr/` |
 | `general` | `general/` | `engineering/`, `finance/`, `hr/`, `marketing/` |
 
-> *Note: General company policy documents (`general/employee_handbook.md`) are accessible to all authenticated users.*
+> *Note: General company documents (`general/employee_handbook.md`) are accessible to all authenticated roles.*
+
+### Security Safeguards
+
+1. **Server-Side Identity Trust**: Client payloads containing `role` parameters are ignored. Role resolution is derived strictly from the authenticated Basic Auth user on the server.
+2. **Pre-Retrieval Metadata Filter**: Vector similarity search is constrained to permitted department folders before vector distance calculation.
+3. **Prompt Injection Safeguards**: Retrieved context is supplied to Gemini as untrusted data with strict system instructions prohibiting role discussions, hallucination, or context escape.
+4. **API Key Secrecy**: `GOOGLE_API_KEY` is loaded strictly via `python-dotenv` from `.env` (ignored by Git) and is never printed, logged, or returned in API responses.
 
 ---
 
-## 📁 Repository Structure
+## 📁 5. Project Folder Structure
 
 ```
 ds-rpc-01/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                 # FastAPI application, auth dependency, endpoints
+│   ├── main.py                 # FastAPI application, auth dependency, & /chat endpoint
 │   ├── schemas/
-│   │   └── chat.py             # Pydantic request/response schemas
+│   │   └── chat.py             # Pydantic request & response models (mode: gemini vs offline_fallback)
 │   ├── services/
-│   │   ├── rbac_service.py     # Role permission mapping
+│   │   ├── rbac_service.py     # Role-to-department permission mapping
 │   │   ├── document_service.py # Document loader, chunker, & sensitive field filter
-│   │   ├── vector_service.py   # Persistent ChromaDB client & vector operations
-│   │   ├── rag_service.py      # Pre-filtered vector retrieval engine
-│   │   ├── answer_service.py   # Offline fallback answer formatter
-│   │   └── search_service.py   # Keyword fallback search service
+│   │   ├── vector_service.py   # Persistent ChromaDB client & vector search engine
+│   │   ├── rag_service.py      # Pre-filtered vector retrieval service
+│   │   ├── llm_service.py      # Google Gemini API service with prompt safeguards
+│   │   ├── answer_service.py   # Answer synthesis coordinator (Gemini vs Offline Fallback)
+│   │   └── search_service.py   # Keyword search service
 │   └── utils/
-├── chroma_db/                  # Generated locally; ignored by Git
+├── chroma_db/                  # Generated locally; persistent vector store (ignored by Git)
 ├── resources/
-│   └── data/                   # Departmental knowledge base
+│   └── data/                   # Knowledge base documents
 │       ├── engineering/        # engineering_master_doc.md
 │       ├── finance/            # financial_summary.md, quarterly_financial_report.md
 │       ├── general/            # employee_handbook.md
 │       ├── hr/                 # hr_data.csv (sensitive fields redacted)
-│       └── marketing/          # 5 quarterly & annual marketing reports
+│       └── marketing/          # quarterly & annual marketing reports
 ├── tests/
 │   ├── test_phase2b.py         # Document chunking & metadata test
-│   ├── test_phase2c.py         # Vector store persistence & deduplication test
-│   ├── test_phase2d.py         # RBAC pre-filtering security test
-│   └── test_phase2e.py         # End-to-end RAG /chat API security test
+│   ├── test_phase2c.py         # ChromaDB persistence & deduplication test
+│   ├── test_phase2d.py         # Secure RBAC pre-filtering test
+│   ├── test_phase2e.py         # End-to-end FastAPI RAG /chat test
+│   └── test_phase2f.py         # Google Gemini integration & secrecy test
 ├── .env.example                # Environment variables template
-├── .gitignore
+├── .gitignore                  # Git ignore rules (includes .env & chroma_db/)
 ├── pyproject.toml              # Project metadata & dependencies
-└── README.md
+└── README.md                   # Project documentation
 ```
 
 ---
 
-## 🛠️ Getting Started
+## 🛠️ 6. Setup Instructions
 
-### 1. Prerequisites
+### Prerequisites
 - **Python**: `>= 3.10`
 - **PowerShell / Terminal**
 
-### 2. Environment Setup & Dependency Installation
+### Installation
 
-Clone the repository and set up your virtual environment:
+Clone the repository and set up a virtual environment:
 
 ```powershell
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/Kavinsharvesh/internal-rag-chatbot-rbac.git
 cd internal-rag-chatbot-rbac
 
-# Create virtual environment
+# 2. Create virtual environment
 python -m venv .venv
 
-# Activate virtual environment (Windows PowerShell)
+# 3. Activate virtual environment (Windows PowerShell)
 .\.venv\Scripts\Activate.ps1
 
-# Install required dependencies
-python -m pip install "fastapi[standard]>=0.115.12" "chromadb>=0.5.0" "sentence-transformers>=3.0.0" "python-dotenv>=1.0.0"
+# 4. Install project dependencies
+python -m pip install -e .
 ```
 
 ---
 
-## 🚀 Running the FastAPI Application
+## 🔑 7. Environment Variable Setup
 
-Start the development server:
+1. Copy `.env.example` to create your local `.env` file:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+2. Open `.env` and add your Google Gemini API key:
+   ```env
+   GOOGLE_API_KEY=your_actual_gemini_api_key_here
+   CHROMA_DB_DIR=chroma_db
+   ```
+
+> ⚠️ **Security Note**: Never commit `.env` to version control. `.env` is already included in `.gitignore`.
+
+---
+
+## 🚀 8. How to Run the Application
+
+Start the FastAPI development server:
 
 ```powershell
 python -m fastapi dev app/main.py
 ```
 
 - **Server URL**: `http://127.0.0.1:8000`
-- **Swagger Documentation**: `http://127.0.0.1:8000/docs`
+- **Interactive Documentation**: `http://127.0.0.1:8000/docs`
 
 ---
 
-## 💡 API Usage Examples
+## 🧪 9. How to Run Tests
 
-### Test Accounts & Roles
+Run the complete test suite using **pytest**:
 
-| Username | Role |
-| :--- | :--- |
-| `Tony` | `engineering` |
-| `Sam` | `finance` |
-| `Natasha` | `hr` |
-| `Bruce` | `marketing` |
+```powershell
+python -m pytest -v tests/
+```
 
-> *Note: Demo passwords are configured in the local application and are intentionally not published here.*
+You can also run individual phase tests directly:
 
-### 1. Authorized Engineering Query (User: `Tony`)
+```powershell
+python tests/test_phase2b.py  # Ingestion & metadata
+python tests/test_phase2c.py  # Vector persistence & deduplication
+python tests/test_phase2d.py  # RBAC pre-vector filtering
+python tests/test_phase2e.py  # End-to-end FastAPI endpoint
+python tests/test_phase2f.py  # Gemini LLM integration & safety
+```
+
+---
+
+## 💡 10. Example API Request and Response
+
+### Test User Credentials
+
+| Username | Role | Permitted Access |
+| :--- | :--- | :--- |
+| `Tony` | `engineering` | `engineering/`, `general/` |
+| `Sam` | `finance` | `finance/`, `general/` |
+| `Natasha` | `hr` | `hr/`, `general/` |
+| `Bruce` | `marketing` | `marketing/`, `general/` |
+
+---
+
+### Example 1: Authorized Engineering Query (`Tony`)
+
+**Request**:
 ```powershell
 curl -u USERNAME:PASSWORD -X POST "http://127.0.0.1:8000/chat" `
      -H "Content-Type: application/json" `
      -d '{"message": "architecture overview"}'
 ```
-**Response**:
+
+**Response** (`mode: "gemini"`):
 ```json
 {
   "query": "architecture overview",
-  "answer": "Offline retrieval fallback: I found relevant information in the authorized company documents.\n\nRelevant excerpts:\n[Excerpt 1 from engineering/engineering_master_doc.md]:\n# FinSolve Technologies Engineering Document...",
+  "answer": "Based on `engineering/engineering_master_doc.md`, FinSolve's architecture is a microservices-based, cloud-native system designed for scalability, resilience, and security. It leverages a modular design to support rapid feature development and seamless integration with third-party financial systems...",
   "sources": [
     "engineering/engineering_master_doc.md"
   ],
   "role": "engineering",
-  "status": "success"
+  "status": "success",
+  "mode": "gemini"
 }
 ```
 
-### 2. Unauthorized Query Attempt (User: `Tony` requesting Finance information)
+---
+
+### Example 2: Unauthorized Cross-Department Attempt (`Tony` requesting Finance)
+
+**Request**:
 ```powershell
 curl -u USERNAME:PASSWORD -X POST "http://127.0.0.1:8000/chat" `
      -H "Content-Type: application/json" `
      -d '{"message": "quarterly revenue report"}'
 ```
+
 **Response**:
 ```json
 {
@@ -189,37 +246,17 @@ curl -u USERNAME:PASSWORD -X POST "http://127.0.0.1:8000/chat" `
   "answer": "No relevant information was found in the authorized company documents.",
   "sources": [],
   "role": "engineering",
-  "status": "no_results"
+  "status": "no_results",
+  "mode": "offline_fallback"
 }
 ```
-*(Pre-filtering restricts ChromaDB to `engineering` and `general` folders. Zero finance documents are retrieved).*
+*(ChromaDB pre-filtering restricts retrieval to `engineering` and `general` folders. Zero finance documents are retrieved, and Gemini is NOT called).*
 
 ---
 
-## 🧪 Running Automated Tests
+## 🛣️ 11. Limitations & Future Improvements
 
-Run the full test suite from your terminal:
-
-```powershell
-# Phase 2B: Document processing & sensitive HR field protection test
-python tests/test_phase2b.py
-
-# Phase 2C: Persistent ChromaDB vector store & deduplication test
-python tests/test_phase2c.py
-
-# Phase 2D: Secure RBAC pre-filtered vector retrieval test
-python tests/test_phase2d.py
-
-# Phase 2E: End-to-end RAG /chat API test (Security, auth, escalation checks)
-python tests/test_phase2e.py
-```
-
----
-
-## 🛣️ Future Roadmap
-
-- 🤖 **LLM Answer Synthesis**: Integration with Google Gemini / OpenAI SDKs for natural conversational summaries.
-- 🛡️ **AI Guardrails**: Topic validation and prompt-injection safety controls.
-- 📊 **Monitoring & Telemetry**: Retrieval metrics, response latency, and usage tracking.
-- 💻 **Interactive UI**: Streamlit web interface for enterprise chat interaction.
-
+- 💬 **Multi-Turn Conversation Memory**: Current implementation evaluates single-turn queries; adding session history tracking will support conversational context.
+- 🛡️ **Advanced AI Guardrails**: Integrating Llama-Guard or NeMo Guardrails for input prompt sanitization and topic enforcement.
+- 📊 **Observability & Telemetry**: Adding OpenTelemetry tracing for vector latency and Gemini token usage monitoring.
+- 💻 **Web Interface**: Developing a Streamlit or React frontend for interactive corporate use.

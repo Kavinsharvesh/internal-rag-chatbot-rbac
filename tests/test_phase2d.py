@@ -108,5 +108,9 @@ def run_phase2d_tests():
     print("==================================================")
 
 
+def test_phase2d():
+    run_phase2d_tests()
+
+
 if __name__ == "__main__":
     run_phase2d_tests()
